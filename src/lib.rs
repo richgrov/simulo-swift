@@ -1,32 +1,138 @@
+pub mod ecs;
+
 mod pose;
+mod transforms;
 
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::sync::Mutex;
+use std::io::{Cursor, Read};
+use std::ops::{Deref, DerefMut};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Instant;
 
-use glam::{IVec2, Mat4, Vec2, Vec4};
+use glam::{IVec2, Mat4, Vec2, Vec3, Vec4};
 
 pub use pose::Pose;
 use shipyard::sparse_set::SparseSet;
 use shipyard::{
-    AllStoragesViewMut, Component, EntitiesView, EntitiesViewMut, EntityId, Get, IntoIter, IntoWorkload, Unique, UniqueView, View, ViewMut, Workload, World
+    AllStoragesViewMut, Borrow, BorrowInfo, Component, EntitiesView, EntitiesViewMut, EntityId,
+    Get, IntoIter, IntoWorkload, Unique, UniqueView, View, ViewMut, Workload, World,
 };
 
-static mut POSE_DATA: pose::PoseData = [0.0; 17 * 2];
-pub(crate) static STATE: Mutex<Option<State>> = Mutex::new(None);
+pub use transforms::*;
 
-pub trait Game: Send + 'static {
-    fn init(&mut self, world: &mut World);
-    fn update(&mut self, world: &mut World, delta: f32);
+static mut POSE_DATA: pose::PoseData = [0.0; 17 * 2];
+static INITIALIZED: AtomicBool = AtomicBool::new(false);
+
+#[allow(unused)]
+pub trait Game {
+    const FIXED_UPDATES_PER_SECOND: f32 = 60.0;
+
+    fn init(&mut self, world: &mut World) {}
+    fn update(&mut self, world: &mut World, delta: f32) {}
+    fn fixed_update(&mut self, world: &mut World) {}
 }
 
-pub(crate) struct State {
-    pub(crate) world: World,
-    pub(crate) poses: HashMap<u32, EntityId>,
-    pub(crate) game: Box<dyn Game>,
+pub fn run<G: Game>(mut game: G) {
+    let mut world = World::new();
+    let mut poses = HashMap::new();
+    let fixed_update_delta = 1.0 / G::FIXED_UPDATES_PER_SECOND;
+    let mut fixed_update_accumulator = 0.0;
+
+    if !INITIALIZED
+        .compare_exchange(false, true, Ordering::Relaxed, Ordering::Relaxed)
+        .is_ok()
+    {
+        panic!("Simulo already initialized");
+    }
+
+    #[allow(static_mut_refs)]
+    unsafe {
+        simulo_set_buffers(POSE_DATA.as_mut_ptr())
+    };
+
+    world.add_workload(post_update_workload);
+
+    let mut time = Instant::now();
+
+    game.init(&mut world);
+
+    let mut events = vec![0u8; 1024 * 32];
+
+    loop {
+        let len = unsafe { simulo_poll(events.as_mut_ptr(), events.len()) };
+        if len < 0 {
+            break;
+        }
+
+        let mut cursor = Cursor::new(&events[..len as usize]);
+        while cursor.position() < len as u64 {
+            let mut event_type = [0u8; 1];
+            cursor.read_exact(&mut event_type).unwrap();
+            match event_type[0] {
+                0 => {
+                    let mut id = [0u8; 4];
+                    cursor.read_exact(&mut id).unwrap();
+                    let id = u32::from_be_bytes(id);
+
+                    let mut pose = [0.0; 17 * 2];
+                    for i in 0..17 {
+                        let mut x = [0u8; 2];
+                        cursor.read_exact(&mut x).unwrap();
+                        let x = u16::from_be_bytes(x);
+                        let mut y = [0u8; 2];
+                        cursor.read_exact(&mut y).unwrap();
+                        let y = u16::from_be_bytes(y);
+                        pose[i * 2] = x as f32;
+                        pose[i * 2 + 1] = y as f32;
+                    }
+
+                    if let Some(entity) = poses.get(&id) {
+                        let mut poses = world.borrow::<ViewMut<Pose>>().unwrap();
+                        (&mut poses).get(*entity).unwrap().0 = pose;
+                    } else {
+                        let entity = world.add_entity((Pose(pose), Children::new([])));
+                        poses.insert(id, entity);
+                    }
+                }
+                1 => {
+                    let mut id = [0u8; 4];
+                    cursor.read_exact(&mut id).unwrap();
+                    let id = u32::from_be_bytes(id);
+                    let entity = poses.remove(&id).unwrap();
+                    world.add_component(entity, Delete);
+                }
+                other => panic!("Unknown event type: {}", other),
+            }
+        }
+
+        let now = Instant::now();
+        let delta = now.duration_since(time).as_secs_f32();
+        time = now;
+
+        world.add_unique(Delta(delta));
+
+        fixed_update_accumulator += delta;
+        while fixed_update_accumulator >= fixed_update_delta {
+            game.fixed_update(&mut world);
+            fixed_update_accumulator -= fixed_update_delta;
+        }
+
+        game.update(&mut world, delta);
+
+        world.run_workload(post_update_workload).unwrap();
+    }
 }
 
 #[derive(Unique)]
 pub struct Delta(pub f32);
+
+impl Deref for Delta {
+    type Target = f32;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
 
 pub struct Material(u32);
 
@@ -46,6 +152,10 @@ impl Material {
     pub fn solid_color(r: f32, g: f32, b: f32) -> Self {
         unsafe { Material(simulo_create_material(std::ptr::null(), 0, r, g, b)) }
     }
+
+    pub fn set_color(&self, r: f32, g: f32, b: f32) {
+        unsafe { simulo_update_material(self.0, r, g, b) }
+    }
 }
 
 impl std::ops::Drop for Material {
@@ -59,7 +169,11 @@ pub struct Rendered(u32);
 
 impl Rendered {
     pub fn new(material: &Material) -> Self {
-        Rendered(unsafe { simulo_create_rendered_object(material.0) })
+        Rendered(unsafe { simulo_create_rendered_object2(material.0, 0) })
+    }
+
+    pub fn new_with_layer(material: &Material, render_order: u32) -> Self {
+        Rendered(unsafe { simulo_create_rendered_object2(material.0, render_order) })
     }
 }
 
@@ -72,45 +186,128 @@ impl std::ops::Drop for Rendered {
 }
 
 #[derive(Component, Clone, Default)]
-pub struct Position2d(pub Vec2);
+pub struct Velocity(pub Vec3);
 
-#[derive(Component, Clone, Default)]
-pub struct Rotation2d(pub f32);
+impl Velocity {
+    pub fn new(x: f32, y: f32, z: f32) -> Self {
+        Self(Vec3::new(x, y, z))
+    }
+}
 
-#[derive(Component, Clone, Default)]
-pub struct Scale2d(pub Vec2);
+impl Deref for Velocity {
+    type Target = Vec3;
 
-#[derive(Component, Clone, Default)]
-pub struct Velocity2d(pub Vec2);
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl DerefMut for Velocity {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
 
 #[derive(Component, Clone, Default)]
 #[track(Insertion, Modification)]
 pub struct Transform(pub Mat4);
 
 impl Transform {
+    #[deprecated]
     pub fn from_2d_pos(position: Vec2) -> Self {
         Self(Mat4::from_translation(position.extend(0.0)))
     }
 
+    #[deprecated]
     pub fn from_2d_pos_scale(position: Vec2, scale: Vec2) -> Self {
         Self(Mat4::from_translation(position.extend(0.0)) * Mat4::from_scale(scale.extend(1.0)))
     }
 
+    #[deprecated]
     pub fn from_2d_pos_rotation(position: Vec2, rotation: f32) -> Self {
         Self(Mat4::from_translation(position.extend(0.0)) * Mat4::from_rotation_z(rotation))
     }
 
+    #[deprecated]
     pub fn from_2d_pos_rotation_scale(position: Vec2, rotation: f32, scale: Vec2) -> Self {
-        Self(Mat4::from_translation(position.extend(0.0)) * Mat4::from_rotation_z(rotation) * Mat4::from_scale(scale.extend(1.0)))
+        Self(
+            Mat4::from_translation(position.extend(0.0))
+                * Mat4::from_rotation_z(rotation)
+                * Mat4::from_scale(scale.extend(1.0)),
+        )
     }
 
-    pub fn from_2d_pos_rotation_scale_skew(position: Vec2, rotation: f32, scale: Vec2, skew: Vec2) -> Self {
-        Self(Mat4::from_translation(position.extend(0.0)) * Mat4::from_rotation_z(rotation) * Mat4::from_scale(scale.extend(1.0)) * Mat4::from_cols(
-            Vec4::new(1.0, skew.y, 0.0, 0.0),
-            Vec4::new(skew.x, 1.0, 0.0, 0.0),
-            Vec4::Z,
-            Vec4::W,
-        ))
+    pub fn from_2d_pos_rotation_scale_skew(
+        position: Vec2,
+        rotation: f32,
+        scale: Vec2,
+        skew: Vec2,
+    ) -> Self {
+        Self(
+            Mat4::from_translation(position.extend(0.0))
+                * Mat4::from_rotation_z(rotation)
+                * Mat4::from_scale(scale.extend(1.0))
+                * Mat4::from_cols(
+                    Vec4::new(1.0, skew.y, 0.0, 0.0),
+                    Vec4::new(skew.x, 1.0, 0.0, 0.0),
+                    Vec4::Z,
+                    Vec4::W,
+                ),
+        )
+    }
+
+    pub fn pos(position: Vec3) -> Self {
+        Self(Mat4::from_translation(position))
+    }
+
+    pub fn pos_rotation(position: Vec3, rotation: f32) -> Self {
+        Self(Mat4::from_translation(position) * Mat4::from_rotation_z(rotation))
+    }
+
+    pub fn pos_rotation_scale(position: Vec3, rotation: f32, scale: Vec3) -> Self {
+        Self(
+            Mat4::from_translation(position)
+                * Mat4::from_rotation_z(rotation)
+                * Mat4::from_scale(scale),
+        )
+    }
+
+    pub fn with_global(self) -> (Transform, GlobalTransform) {
+        (self, GlobalTransform::default())
+    }
+}
+
+impl From<(&Position, &Scale)> for Transform {
+    fn from((position, scale): (&Position, &Scale)) -> Self {
+        Self(Mat4::from_translation(position.0) * Mat4::from_scale(scale.0))
+    }
+}
+
+impl From<Position> for Transform {
+    fn from(position: Position) -> Self {
+        Self(Mat4::from_translation(position.0))
+    }
+}
+
+impl From<(Position, Scale)> for Transform {
+    fn from((position, scale): (Position, Scale)) -> Self {
+        Self(Mat4::from_translation(position.0) * Mat4::from_scale(scale.0))
+    }
+}
+
+impl From<Transform> for (Transform, GlobalTransform) {
+    fn from(value: Transform) -> Self {
+        (value, GlobalTransform::default())
+    }
+}
+
+impl From<(Position, Rotation, Scale)> for Transform {
+    fn from((position, rotation, scale): (Position, Rotation, Scale)) -> Self {
+        Self(
+            Mat4::from_translation(position.0)
+                * Mat4::from_rotation_z(rotation.0)
+                * Mat4::from_scale(scale.0),
+        )
     }
 }
 
@@ -130,32 +327,29 @@ impl Default for GlobalTransform {
     }
 }
 
-#[derive(Component)]
-pub struct Hierarchy {
-    pub children: Vec<EntityId>,
-    pub level: usize,
+#[derive(Borrow, BorrowInfo)]
+pub struct TransformHierarchyMut<'v> {
+    pub v_transforms: ViewMut<'v, Transform>,
+    pub v_global_transforms: ViewMut<'v, GlobalTransform>,
 }
 
-impl Hierarchy {
-    pub fn root() -> Self {
-        Self {
-            children: Vec::new(),
-            level: 0,
-        }
+impl<'v> TransformHierarchyMut<'v> {
+    pub fn view(
+        &mut self,
+    ) -> (
+        &mut ViewMut<'v, Transform>,
+        &mut ViewMut<'v, GlobalTransform>,
+    ) {
+        (&mut self.v_transforms, &mut self.v_global_transforms)
     }
+}
 
-    pub fn root_with_children<const N: usize>(children: [EntityId; N]) -> Self {
-        Self {
-            children: children.to_vec(),
-            level: 0,
-        }
-    }
+#[derive(Component)]
+pub struct Children(pub Vec<EntityId>);
 
-    pub fn child_of<const N: usize>(parent: &Hierarchy, children: [EntityId; N]) -> Self {
-        Self {
-            children: children.to_vec(),
-            level: parent.level + 1,
-        }
+impl Children {
+    pub fn new<const N: usize>(children: [EntityId; N]) -> Self {
+        Self(children.to_vec())
     }
 }
 
@@ -164,8 +358,8 @@ pub struct Delete;
 
 fn velocity_tick(
     delta: UniqueView<Delta>,
-    mut positions: ViewMut<Position2d>,
-    velocities: View<Velocity2d>,
+    mut positions: ViewMut<Position>,
+    velocities: View<Velocity>,
 ) {
     for (position, velocity) in (&mut positions, &velocities).iter() {
         position.0 += velocity.0 * delta.0;
@@ -176,35 +370,15 @@ fn recalculate_transforms(
     transforms: View<Transform>,
     entites: EntitiesViewMut,
     mut transform_states: ViewMut<GlobalTransform>,
-    hierarchies: View<Hierarchy>,
+    v_children: View<Children>,
 ) {
-    let mut updated_transforms = (
-        transforms.inserted_or_modified(),
-        &transform_states,
-        &hierarchies,
-    )
+    let mut bfs = (transforms.inserted_or_modified(), &transform_states)
         .iter()
         .with_id()
-        .map(|(entity, (_, transform_state, hierarchy))| {
-            (entity, transform_state.parent.clone(), hierarchy.level)
-        })
-        .collect::<Vec<_>>();
-
-    updated_transforms.sort_by_key(|&(_, _, level)| level);
-
-    let mut updated_entities = HashSet::new();
-    let mut bfs = VecDeque::new();
-    bfs.extend(
-        updated_transforms
-            .into_iter()
-            .map(|(e, parent_transform, _)| (e, parent_transform)),
-    );
+        .map(|(entity, (_, transform_state))| (entity, transform_state.parent.clone()))
+        .collect::<VecDeque<_>>();
 
     while let Some((entity, parent_transform)) = bfs.pop_front() {
-        if !updated_entities.insert(entity) {
-            continue;
-        }
-
         let global_transform = parent_transform * transforms.get(entity).unwrap().0;
 
         entites.add_component(
@@ -216,8 +390,8 @@ fn recalculate_transforms(
             },
         );
 
-        if let Ok(hierarchy) = hierarchies.get(entity) {
-            for &child in &hierarchy.children {
+        if let Ok(children) = v_children.get(entity) {
+            for &child in &children.0 {
                 bfs.push_back((child, global_transform));
             }
         }
@@ -237,14 +411,14 @@ fn update_global_transforms(transform_states: View<GlobalTransform>, renders: Vi
 
 fn propagate_delete_to_children(
     entities: EntitiesView,
-    hierarchies: View<Hierarchy>,
+    v_children: View<Children>,
     mut deleted: ViewMut<Delete>,
 ) {
     let mut bfs = VecDeque::new();
     let mut seen_children = HashSet::new();
 
-    for (hierarchy, _) in (&hierarchies, &deleted).iter() {
-        for &child in &hierarchy.children {
+    for (children, _) in (&v_children, &deleted).iter() {
+        for &child in &children.0 {
             if seen_children.insert(child) {
                 bfs.push_back(child);
             }
@@ -252,8 +426,8 @@ fn propagate_delete_to_children(
     }
 
     while let Some(entity) = bfs.pop_front() {
-        if let Ok(heirarchy) = hierarchies.get(entity) {
-            for &child in &heirarchy.children {
+        if let Ok(children) = v_children.get(entity) {
+            for &child in &children.0 {
                 if seen_children.insert(child) {
                     bfs.push_back(child);
                 }
@@ -282,58 +456,6 @@ pub fn window_size() -> IVec2 {
     unsafe { IVec2::new(simulo_window_width(), simulo_window_height()) }
 }
 
-#[allow(static_mut_refs)]
-pub fn init(game: Box<dyn Game>) {
-    unsafe {
-        simulo_set_buffers(POSE_DATA.as_mut_ptr());
-        let mut lock = STATE.lock().unwrap();
-        let state = lock.insert(State {
-            poses: HashMap::new(),
-            world: World::new(),
-            game,
-        });
-
-        state.world.add_workload(post_update_workload);
-
-        state.game.as_mut().init(&mut state.world);
-    }
-}
-
-#[unsafe(no_mangle)]
-unsafe extern "C" fn simulo__update(delta: f32) {
-    let mut lock = STATE.lock().unwrap();
-    let state = lock.as_mut().unwrap();
-
-    state.world.add_unique(Delta(delta));
-    state.game.as_mut().update(&mut state.world, delta);
-
-    state.world.run_workload(post_update_workload).unwrap();
-
-    state.world.clear_all_inserted_and_modified();
-    state.world.clear_all_removed_and_deleted();
-}
-
-#[unsafe(no_mangle)]
-unsafe extern "C" fn simulo__pose(id: u32, alive: bool) {
-    let mut lock = STATE.lock().unwrap();
-    let state = lock.as_mut().unwrap();
-
-    if alive {
-        unsafe {
-            if let Some(entity) = state.poses.get(&id) {
-                let mut poses = state.world.borrow::<ViewMut<Pose>>().unwrap();
-                (&mut poses).get(*entity).unwrap().0 = POSE_DATA;
-            } else {
-                let entity = state.world.add_entity((Pose(POSE_DATA), Hierarchy::root()));
-                state.poses.insert(id, entity);
-            }
-        }
-    } else {
-        let entity = state.poses.remove(&id).unwrap();
-        state.world.add_component(entity, Delete);
-    }
-}
-
 unsafe extern "C" {
     fn simulo_set_buffers(pose: *mut f32);
 
@@ -341,7 +463,9 @@ unsafe extern "C" {
     fn simulo_update_material(material: u32, r: f32, g: f32, b: f32);
     fn simulo_drop_material(material: u32);
 
-    fn simulo_create_rendered_object(material: u32) -> u32;
+    fn simulo_poll(buf: *mut u8, len: usize) -> i32;
+
+    fn simulo_create_rendered_object2(material: u32, render_order: u32) -> u32;
     fn simulo_set_rendered_object_material(id: u32, material: u32);
     fn simulo_set_rendered_object_transform(id: u32, matrix: *const f32);
     fn simulo_drop_rendered_object(id: u32);
