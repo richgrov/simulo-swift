@@ -452,8 +452,51 @@ fn post_update_workload() -> Workload {
         .into_workload()
 }
 
+pub trait Camera {
+    fn apply(&self);
+}
+
+pub struct Camera2d {
+    pub near: f32,
+    pub far: f32,
+}
+
+impl Camera for Camera2d {
+    fn apply(&self) {
+        unsafe {
+            simulo_set_camera_2d(self.near, self.far);
+        }
+    }
+}
+
+pub struct Camera3d {
+    pub position: Vec3,
+    pub near: f32,
+    pub far: f32,
+    pub fov: f32,
+}
+
+impl Camera for Camera3d {
+    fn apply(&self) {
+        unsafe {
+            simulo_set_camera_3d(
+                self.position.x,
+                self.position.y,
+                self.position.z,
+                self.fov,
+                self.near,
+                self.far,
+            );
+        }
+    }
+}
+
 pub fn window_size() -> IVec2 {
     unsafe { IVec2::new(simulo_window_width(), simulo_window_height()) }
+}
+
+pub fn set_camera(camera: &impl Camera) {
+    camera.apply();
 }
 
 unsafe extern "C" {
@@ -462,6 +505,9 @@ unsafe extern "C" {
     fn simulo_create_material(name: *const u8, name_len: usize, r: f32, g: f32, b: f32) -> u32;
     fn simulo_update_material(material: u32, r: f32, g: f32, b: f32);
     fn simulo_drop_material(material: u32);
+
+    fn simulo_set_camera_2d(near: f32, far: f32);
+    fn simulo_set_camera_3d(x: f32, y: f32, z: f32, near: f32, far: f32, fov: f32);
 
     fn simulo_poll(buf: *mut u8, len: usize) -> i32;
 
