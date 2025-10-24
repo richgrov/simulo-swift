@@ -78,10 +78,10 @@ pub fn run<G: Game>(mut game: G) {
                     for i in 0..17 {
                         let mut x = [0u8; 2];
                         cursor.read_exact(&mut x).unwrap();
-                        let x = u16::from_be_bytes(x);
+                        let x = i16::from_be_bytes(x);
                         let mut y = [0u8; 2];
                         cursor.read_exact(&mut y).unwrap();
-                        let y = u16::from_be_bytes(y);
+                        let y = i16::from_be_bytes(y);
                         pose[i * 2] = x as f32;
                         pose[i * 2 + 1] = y as f32;
                     }
