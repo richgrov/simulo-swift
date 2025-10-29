@@ -1,4 +1,4 @@
-use std::ops::{Deref, DerefMut};
+use std::ops::{Add, Deref, DerefMut};
 
 use glam::Vec3;
 use shipyard::{Component, ViewMut, Borrow, BorrowInfo, View};
@@ -9,6 +9,14 @@ pub struct Position(pub Vec3);
 impl Position {
     pub fn new(x: f32, y: f32, z: f32) -> Self {
         Self(Vec3::new(x, y, z))
+    }
+}
+
+impl Add<Vec3> for Position {
+    type Output = Self;
+
+    fn add(self, other: Vec3) -> Self::Output {
+        Self(self.0 + other)
     }
 }
 
