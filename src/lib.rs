@@ -446,16 +446,16 @@ fn post_update_workload() -> Workload {
         .into_workload()
 }
 
-pub trait Camera {
+pub trait Projection {
     fn apply(&self);
 }
 
-pub struct Camera2d {
+pub struct Projection2d {
     pub near: f32,
     pub far: f32,
 }
 
-impl Camera for Camera2d {
+impl Projection for Projection2d {
     fn apply(&self) {
         unsafe {
             simulo_set_camera_2d(self.near, self.far);
@@ -463,21 +463,39 @@ impl Camera for Camera2d {
     }
 }
 
-pub struct Camera3d {
+pub struct Projection3d {
     pub position: Vec3,
+    pub rotation: Vec3,
     pub near: f32,
     pub far: f32,
     pub fov: f32,
 }
 
-impl Camera for Camera3d {
+impl Projection for Projection3d {
     fn apply(&self) {
         unsafe {
-            simulo_set_camera_3d(
-                self.position.x,
-                self.position.y,
-                self.position.z,
-                self.fov,
+            simulo_set_camera_3d(self.fov, self.near, self.far);
+        }
+    }
+}
+
+pub struct ProjectionOffAxis {
+    pub top: f32,
+    pub bottom: f32,
+    pub left: f32,
+    pub right: f32,
+    pub near: f32,
+    pub far: f32,
+}
+
+impl Projection for ProjectionOffAxis {
+    fn apply(&self) {
+        unsafe {
+            simulo_set_camera_off_axis(
+                self.top,
+                self.bottom,
+                self.left,
+                self.right,
                 self.near,
                 self.far,
             );
@@ -489,8 +507,23 @@ pub fn window_size() -> IVec2 {
     unsafe { IVec2::new(simulo_window_width(), simulo_window_height()) }
 }
 
-pub fn set_camera(camera: &impl Camera) {
-    camera.apply();
+pub fn set_projection(projection: &impl Projection) {
+    projection.apply();
+}
+
+pub struct Camera {
+    pub position: Vec3,
+    pub rotation: Vec3,
+}
+
+pub fn update_camera(camera: &Camera) {
+    let rotation = Mat4::from_rotation_z(camera.rotation.z)
+        * Mat4::from_rotation_y(camera.rotation.y)
+        * Mat4::from_rotation_x(camera.rotation.x);
+    let view = Mat4::from_translation(-camera.position) * rotation.transpose();
+    unsafe {
+        simulo_set_view_matrix(view.to_cols_array().as_ptr());
+    }
 }
 
 unsafe extern "C" {
@@ -499,7 +532,16 @@ unsafe extern "C" {
     fn simulo_drop_material(material: u32);
 
     fn simulo_set_camera_2d(near: f32, far: f32);
-    fn simulo_set_camera_3d(x: f32, y: f32, z: f32, near: f32, far: f32, fov: f32);
+    fn simulo_set_camera_3d(near: f32, far: f32, fov: f32);
+    fn simulo_set_camera_off_axis(
+        top: f32,
+        bottom: f32,
+        left: f32,
+        right: f32,
+        near: f32,
+        far: f32,
+    );
+    fn simulo_set_view_matrix(matrix: *const f32);
 
     fn simulo_poll(buf: *mut u8, len: usize) -> i32;
 
