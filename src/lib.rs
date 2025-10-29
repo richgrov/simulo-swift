@@ -20,7 +20,6 @@ use shipyard::{
 
 pub use transforms::*;
 
-static mut POSE_DATA: pose::PoseData = [0.0; 17 * 2];
 static INITIALIZED: AtomicBool = AtomicBool::new(false);
 
 #[allow(unused)]
@@ -44,11 +43,6 @@ pub fn run<G: Game>(mut game: G) {
     {
         panic!("Simulo already initialized");
     }
-
-    #[allow(static_mut_refs)]
-    unsafe {
-        simulo_set_buffers(POSE_DATA.as_mut_ptr())
-    };
 
     world.add_workload(post_update_workload);
 
@@ -500,8 +494,6 @@ pub fn set_camera(camera: &impl Camera) {
 }
 
 unsafe extern "C" {
-    fn simulo_set_buffers(pose: *mut f32);
-
     fn simulo_create_material(name: *const u8, name_len: usize, r: f32, g: f32, b: f32) -> u32;
     fn simulo_update_material(material: u32, r: f32, g: f32, b: f32);
     fn simulo_drop_material(material: u32);
