@@ -1,7 +1,7 @@
 use std::ops::{Add, Deref, DerefMut};
 
 use glam::Vec3;
-use shipyard::{Component, ViewMut, Borrow, BorrowInfo, View};
+use shipyard::{Borrow, BorrowInfo, Component, View, ViewMut};
 
 #[derive(Component, Clone, Copy, Default)]
 pub struct Position(pub Vec3);
@@ -22,7 +22,7 @@ impl Add<Vec3> for Position {
 
 impl Deref for Position {
     type Target = Vec3;
-    
+
     fn deref(&self) -> &Self::Target {
         &self.0
     }
@@ -39,7 +39,7 @@ pub struct Rotation(pub f32);
 
 impl Deref for Rotation {
     type Target = f32;
-    
+
     fn deref(&self) -> &Self::Target {
         &self.0
     }
@@ -62,7 +62,7 @@ impl Scale {
 
 impl Deref for Scale {
     type Target = Vec3;
-    
+
     fn deref(&self) -> &Self::Target {
         &self.0
     }
@@ -119,7 +119,17 @@ pub struct PosRotScaleViewMut<'v> {
 }
 
 impl<'v> PosRotScaleViewMut<'v> {
-    pub fn view(&mut self) -> (&mut ViewMut<'v, Position>, &mut ViewMut<'v, Rotation>, &mut ViewMut<'v, Scale>) {
-        (&mut self.v_positions, &mut self.v_rotations, &mut self.v_scales)
+    pub fn view(
+        &mut self,
+    ) -> (
+        &mut ViewMut<'v, Position>,
+        &mut ViewMut<'v, Rotation>,
+        &mut ViewMut<'v, Scale>,
+    ) {
+        (
+            &mut self.v_positions,
+            &mut self.v_rotations,
+            &mut self.v_scales,
+        )
     }
 }
