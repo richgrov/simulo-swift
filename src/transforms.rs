@@ -3,7 +3,7 @@ use std::ops::{Deref, DerefMut};
 use glam::Vec3;
 use shipyard::{Component, ViewMut, Borrow, BorrowInfo, View};
 
-#[derive(Component, Clone, Default)]
+#[derive(Component, Clone, Copy, Default)]
 pub struct Position(pub Vec3);
 
 impl Position {
@@ -26,7 +26,7 @@ impl DerefMut for Position {
     }
 }
 
-#[derive(Component, Clone, Default)]
+#[derive(Component, Clone, Copy, Default)]
 pub struct Rotation(pub f32);
 
 impl Deref for Rotation {
@@ -43,7 +43,7 @@ impl DerefMut for Rotation {
     }
 }
 
-#[derive(Component, Clone, Default)]
+#[derive(Component, Clone, Copy, Default)]
 pub struct Scale(pub Vec3);
 
 impl Scale {
