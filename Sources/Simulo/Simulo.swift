@@ -26,6 +26,7 @@ func simulo_create_material(
 @_extern(c)
 func simulo_drop_material(id: UInt32)
 
+@MainActor
 open class Game {
     var objects: [Object] = []
 
@@ -36,6 +37,7 @@ open class Game {
     }
 }
 
+@MainActor
 public func run(_ game: Game) {
     let capacity = 1024 * 32
     let buf = UnsafeMutablePointer<UInt8>.allocate(capacity: capacity)
@@ -123,23 +125,34 @@ private func readInt16BE(from buf: UnsafeMutablePointer<UInt8>, offset: inout In
     return Int16(bitPattern: u)
 }
 
-public typealias HandlerList = [(ObjectIdentifier, @Sendable (Any) -> (Any) -> Void)]
+public typealias HandlerMap = [ObjectIdentifier: Any]
 
-public func handler<T, E>(_ handler: @Sendable @escaping (T) -> (E) -> Void) -> (
-    ObjectIdentifier, @Sendable (Any) -> (Any) -> Void
+private func makeHandlerTuple<T, E>(
+    _ handler: @escaping (T) -> (E) -> Void,
+    this: T,
+    eventHandlers: inout HandlerMap
 ) {
-    return (
-        ObjectIdentifier(E.self),
-        { this in
-            { arg in
-                handler(this as! T)(arg as! E)
-            }
-        }
-    )
+    let id = ObjectIdentifier(E.self)
+    if let existingHandlers = eventHandlers[id] {
+        var handlerList = existingHandlers as! [(E) -> Void]
+        handlerList.append(handler(this))
+    } else {
+        eventHandlers[id] = [handler(this)]
+    }
 }
 
+public func handlers<T, each E>(
+    _ handlers: repeat @escaping (T) -> (each E) -> Void
+) -> (T, inout HandlerMap) -> Void {
+    return { this, eventHandlers in
+        repeat makeHandlerTuple(each handlers, this: this, eventHandlers: &eventHandlers)
+    }
+}
+
+@MainActor
 public protocol Trait {
-    static var events: HandlerList { get }
+    static var events: (Self, inout HandlerMap) -> Void
+    { get }
 }
 
 public struct UpdateEvent {
@@ -151,6 +164,7 @@ public struct GlobalTransformEvent {
     public let matrix: Mat4
 }
 
+@MainActor
 public class Rendered: Trait {
     private let id: UInt32
 
@@ -170,11 +184,12 @@ public class Rendered: Trait {
         }
     }
 
-    public static let events = [handler(onGlobalTransform)]
+    public static let events = handlers(onGlobalTransform)
 }
 
+@MainActor
 public class Object {
-    private var eventHandlers: [ObjectIdentifier: [(Any) -> Void]] = [:]
+    private var eventHandlers: HandlerMap = [:]
 
     public var pos = Vec3(0, 0, 0)
     public var scale = Vec3(1, 1, 1)
@@ -182,20 +197,15 @@ public class Object {
     public init() {}
 
     public func addTrait<T: Trait>(_ trait: T) {
-        for (id, handler) in T.events {
-            let eventHandler = handler(trait)
-            if var existingHandlers = eventHandlers[id] {
-                existingHandlers.append(eventHandler)
-            } else {
-                eventHandlers[id] = [eventHandler]
-            }
-        }
+        T.events(trait, &eventHandlers)
     }
 
     public func fireEvent<E>(_ event: E) {
         let id = ObjectIdentifier(E.self)
-        for handler in eventHandlers[id] ?? [] {
-            handler(event)
+        if let handlerList = eventHandlers[id] {
+            for handler in handlerList as! [(E) -> Void] {
+                handler(event)
+            }
         }
     }
 
