@@ -35,6 +35,10 @@ open class Game {
     public func addObject(_ object: Object) {
         objects.append(object)
     }
+
+    public func deleteObject(_ object: Object) {
+        objects.removeAll { $0 === object }
+    }
 }
 
 @MainActor
@@ -94,8 +98,9 @@ public func run(_ game: Game) {
             }
         }
 
+        let deltaf = Float(delta) / 1000
         for object in game.objects {
-            object.fireEvent(UpdateEvent(object: object, delta: Float(delta) / 1000))
+            object.update(delta: deltaf)
         }
     }
 }
@@ -125,92 +130,38 @@ private func readInt16BE(from buf: UnsafeMutablePointer<UInt8>, offset: inout In
     return Int16(bitPattern: u)
 }
 
-public typealias HandlerMap = [ObjectIdentifier: Any]
+@MainActor
+open class Object {
+    public var pos = Vec3(0, 0, 0)
+    public var scale = Vec3(1, 1, 1)
 
-private func makeHandlerTuple<T, E>(
-    _ handler: @escaping (T) -> (E) -> Void,
-    this: T,
-    eventHandlers: inout HandlerMap
-) {
-    let id = ObjectIdentifier(E.self)
-    if let existingHandlers = eventHandlers[id] {
-        var handlerList = existingHandlers as! [(E) -> Void]
-        handlerList.append(handler(this))
-    } else {
-        eventHandlers[id] = [handler(this)]
-    }
-}
+    public init() {}
 
-public func handlers<T, each E>(
-    _ handlers: repeat @escaping (T) -> (each E) -> Void
-) -> (T, inout HandlerMap) -> Void {
-    return { this, eventHandlers in
-        repeat makeHandlerTuple(each handlers, this: this, eventHandlers: &eventHandlers)
-    }
+    open func update(delta: Float) {}
+
+    public func moved() {}
 }
 
 @MainActor
-public protocol Trait {
-    static var events: (Self, inout HandlerMap) -> Void
-    { get }
-}
-
-public struct UpdateEvent {
-    public let object: Object
-    public let delta: Float
-}
-
-public struct GlobalTransformEvent {
-    public let matrix: Mat4
-}
-
-@MainActor
-public class Rendered: Trait {
+open class RenderedObject: Object {
     private let id: UInt32
 
     public init(material: Material, renderOrder: UInt32 = 0) {
         id = simulo_create_rendered_object2(material: material.id, renderOrder: renderOrder)
+        super.init()
     }
 
     deinit {
         simulo_drop_rendered_object(id: id)
     }
 
-    func onGlobalTransform(event: GlobalTransformEvent) {
-        withUnsafePointer(to: event.matrix.m) { matrixPtr in
+    public override func moved() {
+        let m = Mat4.translate(pos) * Mat4.scale(scale)
+        withUnsafePointer(to: m.m) { matrixPtr in
             matrixPtr.withMemoryRebound(to: Float.self, capacity: 16) { matrix in
                 simulo_set_rendered_object_transform(id: id, matrix: matrix)
             }
         }
-    }
-
-    public static let events = handlers(onGlobalTransform)
-}
-
-@MainActor
-public class Object {
-    private var eventHandlers: HandlerMap = [:]
-
-    public var pos = Vec3(0, 0, 0)
-    public var scale = Vec3(1, 1, 1)
-
-    public init() {}
-
-    public func addTrait<T: Trait>(_ trait: T) {
-        T.events(trait, &eventHandlers)
-    }
-
-    public func fireEvent<E>(_ event: E) {
-        let id = ObjectIdentifier(E.self)
-        if let handlerList = eventHandlers[id] {
-            for handler in handlerList as! [(E) -> Void] {
-                handler(event)
-            }
-        }
-    }
-
-    public func moved() {
-        fireEvent(GlobalTransformEvent(matrix: Mat4.translate(pos) * Mat4.scale(scale)))
     }
 }
 
@@ -240,57 +191,72 @@ public class Material {
 
 public typealias Vec3 = SIMD3<Float>
 public struct Mat4 {
-    public var m: SIMD16<Float>
+    public var m: (SIMD4<Float>, SIMD4<Float>, SIMD4<Float>, SIMD4<Float>)
 
-    public init(_ m: SIMD16<Float>) {
-        self.m = m
+    public init(_ a: SIMD4<Float>, _ b: SIMD4<Float>, _ c: SIMD4<Float>, _ d: SIMD4<Float>) {
+        self.m = (a, b, c, d)
     }
 
     public static var identity: Mat4 {
         // Column-major 4x4 identity matrix
         return Mat4(
-            SIMD16<Float>(
-                1, 0, 0, 0,
-                0, 1, 0, 0,
-                0, 0, 1, 0,
-                0, 0, 0, 1
-            ))
+            SIMD4<Float>(1, 0, 0, 0),
+            SIMD4<Float>(0, 1, 0, 0),
+            SIMD4<Float>(0, 0, 1, 0),
+            SIMD4<Float>(0, 0, 0, 1)
+        )
     }
 
     public static func translate(_ v: Vec3) -> Mat4 {
         // Column-major translation matrix
         return Mat4(
-            SIMD16<Float>(
-                1, 0, 0, 0,
-                0, 1, 0, 0,
-                0, 0, 1, 0,
-                v.x, v.y, v.z, 1
-            ))
+            SIMD4<Float>(1, 0, 0, 0),
+            SIMD4<Float>(0, 1, 0, 0),
+            SIMD4<Float>(0, 0, 1, 0),
+            SIMD4<Float>(v.x, v.y, v.z, 1)
+        )
     }
 
     public static func scale(_ v: Vec3) -> Mat4 {
         // Column-major scale matrix
         return Mat4(
-            SIMD16<Float>(
-                v.x, 0, 0, 0,
-                0, v.y, 0, 0,
-                0, 0, v.z, 0,
-                0, 0, 0, 1
-            ))
+            SIMD4<Float>(v.x, 0, 0, 0),
+            SIMD4<Float>(0, v.y, 0, 0),
+            SIMD4<Float>(0, 0, v.z, 0),
+            SIMD4<Float>(0, 0, 0, 1)
+        )
     }
 
+    // Matrix multiplication is slow when targeting WASM. Implemented manually for performance.
     public static func * (lhs: Mat4, rhs: Mat4) -> Mat4 {
-        // 4x4 matrix multiplication (column-major)
-        var result = SIMD16<Float>(repeating: 0)
-        for col in 0..<4 {
-            for row in 0..<4 {
-                var sum: Float = 0
-                for i in 0..<4 {
-                    sum += lhs.m[i * 4 + row] * rhs.m[col * 4 + i]
-                }
-                result[col * 4 + row] = sum
-            }
-        }
-        return Mat4(result)
+        let a = lhs.m
+        let b = rhs.m
+
+        let col0 = SIMD4<Float>(
+            a.0.x * b.0.x + a.1.x * b.0.y + a.2.x * b.0.z + a.3.x * b.0.w,
+            a.0.y * b.0.x + a.1.y * b.0.y + a.2.y * b.0.z + a.3.y * b.0.w,
+            a.0.z * b.0.x + a.1.z * b.0.y + a.2.z * b.0.z + a.3.z * b.0.w,
+            a.0.w * b.0.x + a.1.w * b.0.y + a.2.w * b.0.z + a.3.w * b.0.w
+        )
+        let col1 = SIMD4<Float>(
+            a.0.x * b.1.x + a.1.x * b.1.y + a.2.x * b.1.z + a.3.x * b.1.w,
+            a.0.y * b.1.x + a.1.y * b.1.y + a.2.y * b.1.z + a.3.y * b.1.w,
+            a.0.z * b.1.x + a.1.z * b.1.y + a.2.z * b.1.z + a.3.z * b.1.w,
+            a.0.w * b.1.x + a.1.w * b.1.y + a.2.w * b.1.z + a.3.w * b.1.w
+        )
+        let col2 = SIMD4<Float>(
+            a.0.x * b.2.x + a.1.x * b.2.y + a.2.x * b.2.z + a.3.x * b.2.w,
+            a.0.y * b.2.x + a.1.y * b.2.y + a.2.y * b.2.z + a.3.y * b.2.w,
+            a.0.z * b.2.x + a.1.z * b.2.y + a.2.z * b.2.z + a.3.z * b.2.w,
+            a.0.w * b.2.x + a.1.w * b.2.y + a.2.w * b.2.z + a.3.w * b.2.w
+        )
+        let col3 = SIMD4<Float>(
+            a.0.x * b.3.x + a.1.x * b.3.y + a.2.x * b.3.z + a.3.x * b.3.w,
+            a.0.y * b.3.x + a.1.y * b.3.y + a.2.y * b.3.z + a.3.y * b.3.w,
+            a.0.z * b.3.x + a.1.z * b.3.y + a.2.z * b.3.z + a.3.z * b.3.w,
+            a.0.w * b.3.x + a.1.w * b.3.y + a.2.w * b.3.z + a.3.w * b.3.w
+        )
+        return Mat4(col0, col1, col2, col3)
+
     }
 }
