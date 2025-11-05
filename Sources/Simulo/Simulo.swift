@@ -29,6 +29,7 @@ func simulo_drop_material(id: UInt32)
 @MainActor
 open class Game {
     var objects: [Object] = []
+    var windowSize = Vec2i(0, 0)
 
     public init() {}
 
@@ -92,6 +93,12 @@ public func run(_ game: Game) {
                     let id = readUInt32BE(from: buf, offset: &offset, limit: limit)
                     poses.removeValue(forKey: id)
 
+                case 2:  // window resize
+                    guard offset + 4 <= limit else { return }
+                    let width = readUInt16BE(from: buf, offset: &offset, limit: limit)
+                    let height = readUInt16BE(from: buf, offset: &offset, limit: limit)
+                    game.windowSize = Vec2i(Int32(width), Int32(height))
+
                 default:
                     fatalError("Unknown event type: \(eventType)")
                 }
@@ -128,6 +135,17 @@ private func readInt16BE(from buf: UnsafeMutablePointer<UInt8>, offset: inout In
     offset += 2
     let u = (b0 << 8) | b1
     return Int16(bitPattern: u)
+}
+
+@inline(__always)
+private func readUInt16BE(from buf: UnsafeMutablePointer<UInt8>, offset: inout Int, limit: Int)
+    -> UInt16
+{
+    precondition(offset + 2 <= limit)
+    let b0 = UInt16(buf[offset])
+    let b1 = UInt16(buf[offset + 1])
+    offset += 2
+    return (b0 << 8) | b1
 }
 
 @MainActor
