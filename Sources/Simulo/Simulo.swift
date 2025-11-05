@@ -20,7 +20,7 @@ func simulo_drop_rendered_object(id: UInt32)
 @_extern(wasm, module: "env", name: "simulo_create_material")
 @_extern(c)
 func simulo_create_material(
-    namePtr: UInt32, nameLen: UInt32, tintR: Float32, tintG: Float32, tintB: Float32
+    namePtr: UInt32, nameLen: UInt32, tintR: Float32, tintG: Float32, tintB: Float32, tintA: Float32
 ) -> UInt32
 @_extern(wasm, module: "env", name: "simulo_drop_material")
 @_extern(c)
@@ -186,19 +186,22 @@ open class RenderedObject: Object {
 public class Material {
     var id: UInt32 = 0xAAAA_AAAA
 
-    public init(_ name: String?, _ tintR: Float32, _ tintG: Float32, _ tintB: Float32) {
+    public init(
+        _ name: String?, _ tintR: Float32, _ tintG: Float32, _ tintB: Float32, _ tintA: Float32
+    ) {
         if let name = name {
             name.withCString { namePtr in
                 self.id = simulo_create_material(
                     namePtr: UInt32(Int(bitPattern: namePtr)), nameLen: UInt32(name.count),
                     tintR: tintR,
                     tintG: tintG,
-                    tintB: tintB)
+                    tintB: tintB,
+                    tintA: tintA)
             }
         } else {
             self.id = simulo_create_material(
                 namePtr: 0, nameLen: 0, tintR: tintR, tintG: tintG,
-                tintB: tintB)
+                tintB: tintB, tintA: tintA)
         }
     }
 
