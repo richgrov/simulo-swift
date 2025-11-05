@@ -10,9 +10,10 @@ func simulo_create_rendered_object2(material: UInt32, renderOrder: UInt32) -> UI
 @_extern(wasm, module: "env", name: "simulo_set_rendered_object_material")
 @_extern(c)
 func simulo_set_rendered_object_material(id: UInt32, material: UInt32)
-@_extern(wasm, module: "env", name: "simulo_set_rendered_object_transform")
+@_extern(wasm, module: "env", name: "simulo_set_rendered_object_transforms")
 @_extern(c)
-func simulo_set_rendered_object_transform(id: UInt32, matrix: UnsafePointer<Float>)
+func simulo_set_rendered_object_transforms(
+    count: UInt32, ids: UnsafePointer<UInt32>, matrices: UnsafePointer<Float>)
 @_extern(wasm, module: "env", name: "simulo_drop_rendered_object")
 @_extern(c)
 func simulo_drop_rendered_object(id: UInt32)
@@ -25,6 +26,9 @@ func simulo_create_material(
 @_extern(wasm, module: "env", name: "simulo_drop_material")
 @_extern(c)
 func simulo_drop_material(id: UInt32)
+
+@MainActor
+var transformedObjects = [ObjectIdentifier: Object]()
 
 @MainActor
 open class Game {
@@ -109,6 +113,40 @@ public func run(_ game: Game) {
         for object in game.objects {
             object.update(delta: deltaf)
         }
+
+        var transformedIds = [UInt32]()
+        transformedIds.reserveCapacity(transformedObjects.count)
+        var transformedMatrices: [Float] = []
+        transformedMatrices.reserveCapacity(transformedObjects.count * 16)
+
+        var stack: [(Object, Mat4)] = []
+
+        for root in transformedObjects.values {
+            stack.append((root, Mat4.identity))
+            while let (obj, parentTransform) = stack.popLast() {
+                let global = parentTransform * obj.transform
+
+                if let rendered = obj as? RenderedObject {
+                    transformedIds.append(rendered.id)
+                    let m = global.m
+                    transformedMatrices.append(contentsOf: [
+                        m.0.x, m.0.y, m.0.z, m.0.w,
+                        m.1.x, m.1.y, m.1.z, m.1.w,
+                        m.2.x, m.2.y, m.2.z, m.2.w,
+                        m.3.x, m.3.y, m.3.z, m.3.w,
+                    ])
+                }
+
+                for child in obj.children {
+                    stack.append((child, global))
+                }
+            }
+        }
+
+        simulo_set_rendered_object_transforms(
+            count: UInt32(transformedIds.count), ids: transformedIds, matrices: transformedMatrices)
+
+        transformedObjects.removeAll()
     }
 }
 
@@ -148,39 +186,73 @@ private func readUInt16BE(from buf: UnsafeMutablePointer<UInt8>, offset: inout I
     return (b0 << 8) | b1
 }
 
+@resultBuilder
+public struct ObjectChildrenBuilder {
+    public static func buildBlock(_ children: Object...) -> [Object] {
+        children
+    }
+}
+
 @MainActor
 open class Object {
-    public var pos = Vec3(0, 0, 0)
-    public var scale = Vec3(1, 1, 1)
+    public var pos = Vec3(0, 0, 0) {
+        didSet { moved() }
+    }
+    public var scale = Vec3(1, 1, 1) {
+        didSet { moved() }
+    }
+    public var transform: Mat4 {
+        Mat4.translate(pos) * Mat4.scale(scale)
+    }
 
-    public init() {}
+    var children: [Object]
+
+    public init(pos: Vec3 = Vec3(0, 0, 0), scale: Vec3 = Vec3(1, 1, 1)) {
+        self.pos = pos
+        self.scale = scale
+        self.children = []
+    }
+
+    public init(
+        pos: Vec3 = Vec3(0, 0, 0), scale: Vec3 = Vec3(1, 1, 1),
+        @ObjectChildrenBuilder children: () -> [Object]
+    ) {
+        self.pos = pos
+        self.scale = scale
+        self.children = children()
+    }
 
     open func update(delta: Float) {}
 
-    public func moved() {}
+    func moved() {
+        transformedObjects[ObjectIdentifier(self)] = self
+    }
 }
 
 @MainActor
 open class RenderedObject: Object {
-    private let id: UInt32
+    let id: UInt32
 
-    public init(material: Material, renderOrder: UInt32 = 0) {
+    public init(
+        material: Material, renderOrder: UInt32 = 0, pos: Vec3 = Vec3(0, 0, 0),
+        scale: Vec3 = Vec3(1, 1, 1)
+    ) {
         id = simulo_create_rendered_object2(material: material.id, renderOrder: renderOrder)
-        super.init()
+        super.init(pos: pos, scale: scale)
+    }
+
+    public init(
+        material: Material, renderOrder: UInt32 = 0, pos: Vec3 = Vec3(0, 0, 0),
+        scale: Vec3 = Vec3(1, 1, 1), @ObjectChildrenBuilder children: () -> [Object]
+    ) {
+        id = simulo_create_rendered_object2(material: material.id, renderOrder: renderOrder)
+        super.init(pos: pos, scale: scale, children: children)
     }
 
     deinit {
         simulo_drop_rendered_object(id: id)
     }
 
-    public override func moved() {
-        let m = Mat4.translate(pos) * Mat4.scale(scale)
-        withUnsafePointer(to: m.m) { matrixPtr in
-            matrixPtr.withMemoryRebound(to: Float.self, capacity: 16) { matrix in
-                simulo_set_rendered_object_transform(id: id, matrix: matrix)
-            }
-        }
-    }
 }
 
 public class Material {
@@ -210,7 +282,10 @@ public class Material {
     }
 }
 
+public typealias Vec2 = SIMD2<Float>
+public typealias Vec2i = SIMD2<Int32>
 public typealias Vec3 = SIMD3<Float>
+
 public struct Mat4 {
     public var m: (SIMD4<Float>, SIMD4<Float>, SIMD4<Float>, SIMD4<Float>)
 
@@ -278,6 +353,5 @@ public struct Mat4 {
             a.0.w * b.3.x + a.1.w * b.3.y + a.2.w * b.3.z + a.3.w * b.3.w
         )
         return Mat4(col0, col1, col2, col3)
-
     }
 }
