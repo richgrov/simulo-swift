@@ -198,11 +198,14 @@ open class Object {
     public var pos = Vec3(0, 0, 0) {
         didSet { moved() }
     }
+    public var rotation = Vec3(0, 0, 0) {
+        didSet { moved() }
+    }
     public var scale = Vec3(1, 1, 1) {
         didSet { moved() }
     }
     public var transform: Mat4 {
-        Mat4.translate(pos) * Mat4.scale(scale)
+        Mat4.translate(pos) * Mat4.rotate(rotation) * Mat4.scale(scale)
     }
 
     var children: [Object]
@@ -286,6 +289,12 @@ public typealias Vec2 = SIMD2<Float>
 public typealias Vec2i = SIMD2<Int32>
 public typealias Vec3 = SIMD3<Float>
 
+extension Vec2i {
+    public func asVec2() -> Vec2 {
+        Vec2(Float(x), Float(y))
+    }
+}
+
 public struct Mat4 {
     public var m: (SIMD4<Float>, SIMD4<Float>, SIMD4<Float>, SIMD4<Float>)
 
@@ -311,6 +320,28 @@ public struct Mat4 {
             SIMD4<Float>(0, 0, 1, 0),
             SIMD4<Float>(v.x, v.y, v.z, 1)
         )
+    }
+
+    public static func rotate(_ v: Vec3) -> Mat4 {
+        let rotX = Mat4(
+            SIMD4<Float>(1, 0, 0, 0),
+            SIMD4<Float>(0, cos(v.x), -sin(v.x), 0),
+            SIMD4<Float>(0, sin(v.x), cos(v.x), 0),
+            SIMD4<Float>(0, 0, 0, 1)
+        )
+        let rotY = Mat4(
+            SIMD4<Float>(cos(v.y), 0, sin(v.y), 0),
+            SIMD4<Float>(0, 1, 0, 0),
+            SIMD4<Float>(-sin(v.y), 0, cos(v.y), 0),
+            SIMD4<Float>(0, 0, 0, 1)
+        )
+        let rotZ = Mat4(
+            SIMD4<Float>(cos(v.z), -sin(v.z), 0, 0),
+            SIMD4<Float>(sin(v.z), cos(v.z), 0, 0),
+            SIMD4<Float>(0, 0, 1, 0),
+            SIMD4<Float>(0, 0, 0, 1)
+        )
+        return rotX * rotY * rotZ
     }
 
     public static func scale(_ v: Vec3) -> Mat4 {
