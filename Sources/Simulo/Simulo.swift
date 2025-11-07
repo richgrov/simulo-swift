@@ -33,9 +33,68 @@ var transformedObjects = [ObjectIdentifier: Object]()
 @MainActor
 open class Game {
     var objects: [Object] = []
-    var windowSize = Vec2i(0, 0)
+    var eventBuf = [UInt8](repeating: 0, count: 1024 * 32)
+    var poses: [UInt32: [Float]] = [:]
+    public internal(set) var windowSize = Vec2i(0, 0)
 
-    public init() {}
+    public init() {
+        // Poll events once to initialize the window size
+        _ = self.handleEvents()
+    }
+
+    func handleEvents() -> Bool {
+        let len = simulo_poll(buf: &eventBuf, len: UInt32(eventBuf.count))
+        if len < 0 { return false }
+        if len > 0 {
+            var offset = 0
+            let limit = Int(len)
+
+            while offset < limit {
+                let eventType = eventBuf[offset]
+                offset += 1
+
+                switch eventType {
+                case 0:  // upsert/move with pose
+                    guard offset + 4 <= limit else { return false }
+                    let id = readUInt32BE(from: &eventBuf, offset: &offset, limit: limit)
+
+                    // Read 17 pairs of i16 (big-endian) -> 34 floats
+                    var pose: [Float] = Array(repeating: 0, count: 17 * 2)
+                    for i in 0..<17 {
+                        guard offset + 4 <= limit else { return false }
+                        let x = Float(
+                            readInt16BE(from: &eventBuf, offset: &offset, limit: limit))
+                        let y = Float(
+                            readInt16BE(from: &eventBuf, offset: &offset, limit: limit))
+                        pose[i * 2] = x
+                        pose[i * 2 + 1] = y
+                    }
+
+                    if poses[id] != nil {
+                        poses[id] = pose
+                    } else {
+                        poses[id] = pose
+                    }
+
+                case 1:  // delete by id
+                    guard offset + 4 <= limit else { return false }
+                    let id = readUInt32BE(from: &eventBuf, offset: &offset, limit: limit)
+                    poses.removeValue(forKey: id)
+
+                case 2:  // window resize
+                    guard offset + 4 <= limit else { return false }
+                    let width = readUInt16BE(from: &eventBuf, offset: &offset, limit: limit)
+                    let height = readUInt16BE(from: &eventBuf, offset: &offset, limit: limit)
+                    windowSize = Vec2i(Int32(width), Int32(height))
+
+                default:
+                    fatalError("Unknown event type: \(eventType)")
+                }
+            }
+        }
+
+        return true
+    }
 
     public func addObject(_ object: Object) {
         objects.append(object)
@@ -48,11 +107,6 @@ open class Game {
 
 @MainActor
 public func run(_ game: Game) {
-    let capacity = 1024 * 32
-    let buf = UnsafeMutablePointer<UInt8>.allocate(capacity: capacity)
-    defer { buf.deallocate() }
-
-    var poses: [UInt32: [Float]] = [:]
 
     var time = Int64(Date().timeIntervalSince1970 * 1000)
 
@@ -61,52 +115,8 @@ public func run(_ game: Game) {
         let delta = now - time
         time = now
 
-        let len = simulo_poll(buf: buf, len: UInt32(capacity))
-        if len < 0 { break }
-        if len > 0 {
-            var offset = 0
-            let limit = Int(len)
-
-            while offset < limit {
-                let eventType = buf[offset]
-                offset += 1
-
-                switch eventType {
-                case 0:  // upsert/move with pose
-                    guard offset + 4 <= limit else { return }
-                    let id = readUInt32BE(from: buf, offset: &offset, limit: limit)
-
-                    // Read 17 pairs of i16 (big-endian) -> 34 floats
-                    var pose: [Float] = Array(repeating: 0, count: 17 * 2)
-                    for i in 0..<17 {
-                        guard offset + 4 <= limit else { return }
-                        let x = Float(readInt16BE(from: buf, offset: &offset, limit: limit))
-                        let y = Float(readInt16BE(from: buf, offset: &offset, limit: limit))
-                        pose[i * 2] = x
-                        pose[i * 2 + 1] = y
-                    }
-
-                    if poses[id] != nil {
-                        poses[id] = pose
-                    } else {
-                        poses[id] = pose
-                    }
-
-                case 1:  // delete by id
-                    guard offset + 4 <= limit else { return }
-                    let id = readUInt32BE(from: buf, offset: &offset, limit: limit)
-                    poses.removeValue(forKey: id)
-
-                case 2:  // window resize
-                    guard offset + 4 <= limit else { return }
-                    let width = readUInt16BE(from: buf, offset: &offset, limit: limit)
-                    let height = readUInt16BE(from: buf, offset: &offset, limit: limit)
-                    game.windowSize = Vec2i(Int32(width), Int32(height))
-
-                default:
-                    fatalError("Unknown event type: \(eventType)")
-                }
-            }
+        if !game.handleEvents() {
+            break
         }
 
         let deltaf = Float(delta) / 1000
