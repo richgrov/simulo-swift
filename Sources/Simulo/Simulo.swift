@@ -23,6 +23,10 @@ func simulo_drop_rendered_object(id: UInt32)
 func simulo_create_material(
     namePtr: UInt32, nameLen: UInt32, tintR: Float32, tintG: Float32, tintB: Float32, tintA: Float32
 ) -> UInt32
+@_extern(wasm, module: "env", name: "simulo_update_material")
+@_extern(c)
+func simulo_update_material(
+    id: UInt32, tintR: Float32, tintG: Float32, tintB: Float32, tintA: Float32)
 @_extern(wasm, module: "env", name: "simulo_drop_material")
 @_extern(c)
 func simulo_drop_material(id: UInt32)
@@ -270,10 +274,18 @@ open class RenderedObject: Object {
 
 public class Material {
     var id: UInt32 = 0xAAAA_AAAA
+    public var color: Vec4 {
+        didSet {
+            simulo_update_material(
+                id: id, tintR: color.x, tintG: color.y, tintB: color.z, tintA: color.w)
+        }
+    }
 
     public init(
         _ name: String?, _ tintR: Float32, _ tintG: Float32, _ tintB: Float32, _ tintA: Float32
     ) {
+        self.color = Vec4(tintR, tintG, tintB, tintA)
+
         if let name = name {
             name.withCString { namePtr in
                 self.id = simulo_create_material(
@@ -298,6 +310,7 @@ public class Material {
 public typealias Vec2 = SIMD2<Float>
 public typealias Vec2i = SIMD2<Int32>
 public typealias Vec3 = SIMD3<Float>
+public typealias Vec4 = SIMD4<Float>
 
 extension Vec2i {
     public func asVec2() -> Vec2 {
