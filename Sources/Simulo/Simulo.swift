@@ -100,6 +100,8 @@ open class Game {
         return true
     }
 
+    open func update(delta: Float) {}
+
     public func addObject(_ object: Object) {
         if object.index != -1 {
             fatalError("tried to add object that was already added")
@@ -131,6 +133,7 @@ public func run(_ game: Game) {
         }
 
         let deltaf = Float(delta) / 1000
+        game.update(delta: deltaf)
         for object in game.objects {
             object.update(delta: deltaf)
         }
