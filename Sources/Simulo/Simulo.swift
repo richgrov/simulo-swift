@@ -217,6 +217,8 @@ public struct ObjectChildrenBuilder {
     }
 }
 
+public typealias Children = () -> [Object]
+
 @MainActor
 open class Object {
     public var pos = Vec3(0, 0, 0) {
@@ -248,7 +250,7 @@ open class Object {
 
     public init(
         pos: Vec3 = Vec3(0, 0, 0), scale: Vec3 = Vec3(1, 1, 1),
-        @ObjectChildrenBuilder children: () -> [Object]
+        @ObjectChildrenBuilder children: Children
     ) {
         self.pos = pos
         self.scale = scale
@@ -281,7 +283,7 @@ open class RenderedObject: Object {
 
     public init(
         material: Material, renderOrder: UInt32 = 0, pos: Vec3 = Vec3(0, 0, 0),
-        scale: Vec3 = Vec3(1, 1, 1), @ObjectChildrenBuilder children: () -> [Object]
+        scale: Vec3 = Vec3(1, 1, 1), @ObjectChildrenBuilder children: Children
     ) {
         id = simulo_create_rendered_object2(material: material.id, renderOrder: renderOrder)
         super.init(pos: pos, scale: scale, children: children)
