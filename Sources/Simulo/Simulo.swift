@@ -136,9 +136,10 @@ public func run(_ game: Game) {
         var stack: [(Object, Mat4)] = []
 
         for root in transformedObjects.values {
-            stack.append((root, Mat4.identity))
+            stack.append((root, root.parentTransform))
             while let (obj, parentTransform) = stack.popLast() {
-                let global = parentTransform * obj.transform
+                obj.parentTransform = parentTransform
+                let global = obj.globalTransform
 
                 if let rendered = obj as? RenderedObject {
                     transformedIds.append(rendered.id)
@@ -218,8 +219,12 @@ open class Object {
     public var scale = Vec3(1, 1, 1) {
         didSet { moved() }
     }
+    public internal(set) var parentTransform = Mat4.identity
     public var transform: Mat4 {
         Mat4.translate(pos) * Mat4.rotate(rotation) * Mat4.scale(scale)
+    }
+    public var globalTransform: Mat4 {
+        parentTransform * transform
     }
 
     var children: [Object]
@@ -228,6 +233,7 @@ open class Object {
         self.pos = pos
         self.scale = scale
         self.children = []
+        moved()
     }
 
     public init(
@@ -237,6 +243,7 @@ open class Object {
         self.pos = pos
         self.scale = scale
         self.children = children()
+        moved()
     }
 
     open func update(delta: Float) {}
