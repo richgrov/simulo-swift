@@ -39,7 +39,7 @@ open class Game {
     static var eventBuf = [UInt8](repeating: 0, count: 1024 * 32)
     static var poses: [UInt32: [Float]] = [:]
     public internal(set) static var windowSize = Vec2i(0, 0)
-    public static var rootObject = Object()
+    public internal(set) static var rootObject = Object()
 
     public static func setup() {
         _ = handleEvents()
@@ -98,63 +98,64 @@ open class Game {
 
         return true
     }
-}
 
-@MainActor
-public func run() {
-    var time = Int64(Date().timeIntervalSince1970 * 1000)
+    public static func run(root: Object) {
+        rootObject = root
+        var time = Int64(Date().timeIntervalSince1970 * 1000)
 
-    while true {
-        let now = Int64(Date().timeIntervalSince1970 * 1000)
-        let delta = now - time
-        time = now
+        while true {
+            let now = Int64(Date().timeIntervalSince1970 * 1000)
+            let delta = now - time
+            time = now
 
-        if !Game.handleEvents() {
-            break
-        }
-
-        let deltaf = Float(delta) / 1000
-        var updateStack: [Object] = [Game.rootObject]
-        while let obj = updateStack.popLast() {
-            obj.update(delta: deltaf)
-            for child in obj.children {
-                updateStack.append(child)
+            if !Game.handleEvents() {
+                break
             }
-        }
 
-        var transformedIds = [UInt32]()
-        transformedIds.reserveCapacity(transformedObjects.count)
-        var transformedMatrices: [Float] = []
-        transformedMatrices.reserveCapacity(transformedObjects.count * 16)
-
-        var stack: [Object] = []
-
-        for root in transformedObjects.values {
-            stack.append(root)
-            while let obj = stack.popLast() {
-                let global = obj.globalTransform
-
-                if let rendered = obj as? RenderedObject {
-                    transformedIds.append(rendered.id)
-                    let m = global.m
-                    transformedMatrices.append(contentsOf: [
-                        m.0.x, m.0.y, m.0.z, m.0.w,
-                        m.1.x, m.1.y, m.1.z, m.1.w,
-                        m.2.x, m.2.y, m.2.z, m.2.w,
-                        m.3.x, m.3.y, m.3.z, m.3.w,
-                    ])
-                }
-
+            let deltaf = Float(delta) / 1000
+            var updateStack: [Object] = [Game.rootObject]
+            while let obj = updateStack.popLast() {
+                obj.update(delta: deltaf)
                 for child in obj.children {
-                    stack.append(child)
+                    updateStack.append(child)
                 }
             }
+
+            var transformedIds = [UInt32]()
+            transformedIds.reserveCapacity(transformedObjects.count)
+            var transformedMatrices: [Float] = []
+            transformedMatrices.reserveCapacity(transformedObjects.count * 16)
+
+            var stack: [Object] = []
+
+            for root in transformedObjects.values {
+                stack.append(root)
+                while let obj = stack.popLast() {
+                    let global = obj.globalTransform
+
+                    if let rendered = obj as? RenderedObject {
+                        transformedIds.append(rendered.id)
+                        let m = global.m
+                        transformedMatrices.append(contentsOf: [
+                            m.0.x, m.0.y, m.0.z, m.0.w,
+                            m.1.x, m.1.y, m.1.z, m.1.w,
+                            m.2.x, m.2.y, m.2.z, m.2.w,
+                            m.3.x, m.3.y, m.3.z, m.3.w,
+                        ])
+                    }
+
+                    for child in obj.children {
+                        stack.append(child)
+                    }
+                }
+            }
+
+            simulo_set_rendered_object_transforms(
+                count: UInt32(transformedIds.count), ids: transformedIds,
+                matrices: transformedMatrices)
+
+            transformedObjects.removeAll()
         }
-
-        simulo_set_rendered_object_transforms(
-            count: UInt32(transformedIds.count), ids: transformedIds, matrices: transformedMatrices)
-
-        transformedObjects.removeAll()
     }
 }
 
