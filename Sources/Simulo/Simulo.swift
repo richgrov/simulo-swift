@@ -36,17 +36,16 @@ var transformedObjects = [ObjectIdentifier: Object]()
 
 @MainActor
 open class Game {
-    var objects: [Object] = []
-    var eventBuf = [UInt8](repeating: 0, count: 1024 * 32)
-    var poses: [UInt32: [Float]] = [:]
-    public internal(set) var windowSize = Vec2i(0, 0)
+    static var eventBuf = [UInt8](repeating: 0, count: 1024 * 32)
+    static var poses: [UInt32: [Float]] = [:]
+    public internal(set) static var windowSize = Vec2i(0, 0)
+    public static var rootObject = Object()
 
-    public init() {
-        // Poll events once to initialize the window size
-        _ = self.handleEvents()
+    public static func setup() {
+        _ = handleEvents()
     }
 
-    func handleEvents() -> Bool {
+    static func handleEvents() -> Bool {
         let len = simulo_poll(buf: &eventBuf, len: UInt32(eventBuf.count))
         if len < 0 { return false }
         if len > 0 {
@@ -89,7 +88,7 @@ open class Game {
                     guard offset + 4 <= limit else { return false }
                     let width = readUInt16BE(from: &eventBuf, offset: &offset, limit: limit)
                     let height = readUInt16BE(from: &eventBuf, offset: &offset, limit: limit)
-                    windowSize = Vec2i(Int32(width), Int32(height))
+                    Game.windowSize = Vec2i(Int32(width), Int32(height))
 
                 default:
                     fatalError("Unknown event type: \(eventType)")
@@ -99,28 +98,10 @@ open class Game {
 
         return true
     }
-
-    open func update(delta: Float) {}
-
-    public func addObject(_ object: Object) {
-        if object.index != -1 {
-            fatalError("tried to add object that was already added")
-        }
-
-        objects.append(object)
-        object.index = objects.count - 1
-    }
-
-    public func deleteObject(_ object: Object) {
-        objects.swapAt(object.index, objects.count - 1)
-        objects.removeLast()
-        objects[object.index].index = object.index
-        object.index = -1
-    }
 }
 
 @MainActor
-public func run(_ game: Game) {
+public func run() {
     var time = Int64(Date().timeIntervalSince1970 * 1000)
 
     while true {
@@ -128,14 +109,17 @@ public func run(_ game: Game) {
         let delta = now - time
         time = now
 
-        if !game.handleEvents() {
+        if !Game.handleEvents() {
             break
         }
 
         let deltaf = Float(delta) / 1000
-        game.update(delta: deltaf)
-        for object in game.objects {
-            object.update(delta: deltaf)
+        var updateStack: [Object] = [Game.rootObject]
+        while let obj = updateStack.popLast() {
+            obj.update(delta: deltaf)
+            for child in obj.children {
+                updateStack.append(child)
+            }
         }
 
         var transformedIds = [UInt32]()
@@ -266,6 +250,27 @@ open class Object {
 
     func moved() {
         transformedObjects[ObjectIdentifier(self)] = self
+    }
+
+    public func addChild(_ child: Object) {
+        if child.index != -1 {
+            fatalError("tried to add child that was already added")
+        }
+
+        children.append(child)
+        child.parent = self
+        child.index = children.count - 1
+    }
+
+    public func deleteChild(_ child: Object) {
+        children.swapAt(child.index, children.count - 1)
+        children.removeLast()
+        children[child.index].index = child.index
+        child.index = -1
+    }
+
+    public func deleteFromParent() {
+        parent!.deleteChild(self)
     }
 }
 
