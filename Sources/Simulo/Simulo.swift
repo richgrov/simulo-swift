@@ -101,17 +101,24 @@ open class Game {
     }
 
     public func addObject(_ object: Object) {
+        if object.index != -1 {
+            fatalError("tried to add object that was already added")
+        }
+
         objects.append(object)
+        object.index = objects.count - 1
     }
 
     public func deleteObject(_ object: Object) {
-        objects.removeAll { $0 === object }
+        objects.swapAt(object.index, objects.count - 1)
+        objects.removeLast()
+        objects[object.index].index = object.index
+        object.index = -1
     }
 }
 
 @MainActor
 public func run(_ game: Game) {
-
     var time = Int64(Date().timeIntervalSince1970 * 1000)
 
     while true {
@@ -133,12 +140,11 @@ public func run(_ game: Game) {
         var transformedMatrices: [Float] = []
         transformedMatrices.reserveCapacity(transformedObjects.count * 16)
 
-        var stack: [(Object, Mat4)] = []
+        var stack: [Object] = []
 
         for root in transformedObjects.values {
-            stack.append((root, root.parentTransform))
-            while let (obj, parentTransform) = stack.popLast() {
-                obj.parentTransform = parentTransform
+            stack.append(root)
+            while let obj = stack.popLast() {
                 let global = obj.globalTransform
 
                 if let rendered = obj as? RenderedObject {
@@ -153,7 +159,7 @@ public func run(_ game: Game) {
                 }
 
                 for child in obj.children {
-                    stack.append((child, global))
+                    stack.append(child)
                 }
             }
         }
@@ -219,13 +225,14 @@ open class Object {
     public var scale = Vec3(1, 1, 1) {
         didSet { moved() }
     }
-    public internal(set) var parentTransform = Mat4.identity
+    public internal(set) unowned var parent: Object? = nil
     public var transform: Mat4 {
         Mat4.translate(pos) * Mat4.rotate(rotation) * Mat4.scale(scale)
     }
     public var globalTransform: Mat4 {
-        parentTransform * transform
+        (parent?.globalTransform ?? Mat4.identity) * transform
     }
+    var index = -1
 
     var children: [Object]
 
@@ -243,6 +250,10 @@ open class Object {
         self.pos = pos
         self.scale = scale
         self.children = children()
+        for (i, child) in self.children.enumerated() {
+            child.parent = self
+            child.index = i
+        }
         moved()
     }
 
