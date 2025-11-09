@@ -11,6 +11,16 @@ extension Vec2i {
     }
 }
 
+extension Vec2 {
+    public func extend(_ z: Float) -> Vec3 {
+        Vec3(x, y, z)
+    }
+
+    public static func fromAngle(_ angle: Float) -> Vec2 {
+        Vec2(cos(angle), sin(angle))
+    }
+}
+
 public struct Mat4 {
     public var m: (SIMD4<Float>, SIMD4<Float>, SIMD4<Float>, SIMD4<Float>)
 
