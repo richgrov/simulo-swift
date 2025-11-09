@@ -329,3 +329,21 @@ public class Material {
         simulo_drop_material(id: id)
     }
 }
+
+public class Interval {
+    let period: Float
+    var elapsed: Float = 0
+
+    public init(period: Float) {
+        self.period = period
+    }
+
+    public func update(_ delta: Float) -> Bool {
+        elapsed += delta
+        if elapsed >= period {
+            elapsed -= period
+            return true
+        }
+        return false
+    }
+}
