@@ -336,6 +336,76 @@ public class Material {
     }
 }
 
+class Particle: RenderedObject {
+    let angle: Float
+    let speed: Float
+    let scaleDecay: Float
+
+    public init(material: Material, angle: Float, speed: Float, scale: Float, scaleDecay: Float) {
+        self.angle = angle
+        self.speed = speed
+        self.scaleDecay = scaleDecay
+        super.init(material: material, pos: Vec3(0, 0, 0), scale: Vec3(scale, scale, 1))
+    }
+
+    public override func update(delta: Float) {
+        pos += Vec2.fromAngle(angle).extend(0) * speed * delta
+        scale -= Vec3(scaleDecay, scaleDecay, 0) * delta
+
+        if scale.x <= 0 {
+            deleteFromParent()
+        }
+    }
+}
+
+public class ParticleEmitter: Object {
+    let angles: Range<Float>
+    let speed: Range<Float>
+    let startingScale: Float
+    let scaleDecay: Float
+    let materials: [Material]
+
+    let spawnInterval: Float
+    var elapsed: Float = 0
+
+    public init(
+        pos: Vec3 = Vec3(0, 0, 0),
+        angles: Range<Float> = 0..<(2 * Float.pi),
+        speed: Range<Float> = 100..<100,
+        startingScale: Float = 4,
+        scaleDecay: Float = 2,
+        materials: [Material],
+        spawnInterval: Float = 0.1
+    ) {
+        self.angles = angles
+        self.speed = speed
+        self.startingScale = startingScale
+        self.scaleDecay = scaleDecay
+        self.materials = materials
+
+        self.spawnInterval = spawnInterval
+
+        super.init(pos: pos)
+    }
+
+    public override func update(delta: Float) {
+        elapsed += delta
+        if elapsed < spawnInterval {
+            return
+        }
+
+        elapsed -= spawnInterval
+        let angle = Float.random(in: angles)
+        let speed = Float.random(in: speed)
+        addChild(
+            Particle(
+                material: materials.randomElement()!, angle: angle, speed: speed,
+                scale: startingScale, scaleDecay: scaleDecay
+            )
+        )
+    }
+}
+
 public class Interval {
     let period: Float
     var elapsed: Float = 0
