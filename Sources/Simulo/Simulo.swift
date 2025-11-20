@@ -41,9 +41,10 @@ var transformedObjects = [ObjectIdentifier: Object]()
 @MainActor
 open class Game {
     static var eventBuf = [UInt8](repeating: 0, count: 1024 * 32)
-    static var poses: [UInt32: [Float]] = [:]
+    static var poses: [UInt32: HasPose] = [:]
     public internal(set) static var windowSize = Vec2i(0, 0)
     public internal(set) static var rootObject = Object()
+    public static var playerMaker: (Pose) -> HasPose = { pose in BasicPlayer.init(pose: pose) }
 
     public static func setup() {
         _ = handleEvents()
@@ -77,10 +78,10 @@ open class Game {
                         pose[i * 2 + 1] = y
                     }
 
-                    if poses[id] != nil {
-                        poses[id] = pose
+                    if let poseObj = poses[id] {
+                        poseObj.pose = Pose(data: pose)
                     } else {
-                        poses[id] = pose
+                        poses[id] = Game.playerMaker(Pose(data: pose))
                     }
 
                 case 1:  // delete by id
@@ -203,6 +204,64 @@ private func readUInt16BE(from buf: UnsafeMutablePointer<UInt8>, offset: inout I
 public struct ObjectChildrenBuilder {
     public static func buildBlock(_ children: Object...) -> [Object] {
         children
+    }
+}
+
+public struct Pose {
+    var data: [Float]
+
+    public static let NOSE: Int = 0
+    public static let LEFT_EYE: Int = 1
+    public static let RIGHT_EYE: Int = 2
+    public static let LEFT_EAR: Int = 3
+    public static let RIGHT_EAR: Int = 4
+    public static let LEFT_SHOULDER: Int = 5
+    public static let RIGHT_SHOULDER: Int = 6
+    public static let LEFT_ELBOW: Int = 7
+    public static let RIGHT_ELBOW: Int = 8
+    public static let LEFT_WRIST: Int = 9
+    public static let RIGHT_WRIST: Int = 10
+    public static let LEFT_HIP: Int = 11
+    public static let RIGHT_HIP: Int = 12
+    public static let LEFT_KNEE: Int = 13
+    public static let RIGHT_KNEE: Int = 14
+    public static let LEFT_ANKLE: Int = 15
+    public static let RIGHT_ANKLE: Int = 16
+
+    public var nose: Vec2 { keypoint(Self.NOSE) }
+    public var leftEye: Vec2 { keypoint(Self.LEFT_EYE) }
+    public var rightEye: Vec2 { keypoint(Self.RIGHT_EYE) }
+    public var leftEar: Vec2 { keypoint(Self.LEFT_EAR) }
+    public var rightEar: Vec2 { keypoint(Self.RIGHT_EAR) }
+    public var leftShoulder: Vec2 { keypoint(Self.LEFT_SHOULDER) }
+    public var rightShoulder: Vec2 { keypoint(Self.RIGHT_SHOULDER) }
+    public var leftElbow: Vec2 { keypoint(Self.LEFT_ELBOW) }
+    public var rightElbow: Vec2 { keypoint(Self.RIGHT_ELBOW) }
+    public var leftWrist: Vec2 { keypoint(Self.LEFT_WRIST) }
+    public var rightWrist: Vec2 { keypoint(Self.RIGHT_WRIST) }
+    public var leftHip: Vec2 { keypoint(Self.LEFT_HIP) }
+    public var rightHip: Vec2 { keypoint(Self.RIGHT_HIP) }
+    public var leftKnee: Vec2 { keypoint(Self.LEFT_KNEE) }
+    public var rightKnee: Vec2 { keypoint(Self.RIGHT_KNEE) }
+    public var leftAnkle: Vec2 { keypoint(Self.LEFT_ANKLE) }
+    public var rightAnkle: Vec2 { keypoint(Self.RIGHT_ANKLE) }
+
+    public func keypoint(_ index: Int) -> Vec2 {
+        Vec2(data[index * 2], data[index * 2 + 1])
+    }
+}
+
+@MainActor
+public protocol HasPose: Object {
+    var pose: Pose { get set }
+}
+
+class BasicPlayer: Object, HasPose {
+    var pose: Pose
+
+    init(pose: Pose) {
+        self.pose = pose
+        super.init()
     }
 }
 
