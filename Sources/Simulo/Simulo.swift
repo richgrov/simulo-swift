@@ -371,7 +371,7 @@ public class ParticleEmitter: Object {
     public init(
         pos: Vec3 = Vec3(0, 0, 0),
         angles: Range<Float> = 0..<(2 * Float.pi),
-        speed: Range<Float> = 100..<100,
+        speed: Range<Float> = 100..<150,
         startingScale: Float = 4,
         scaleDecay: Float = 2,
         materials: [Material],
