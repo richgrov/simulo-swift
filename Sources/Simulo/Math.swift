@@ -19,6 +19,16 @@ extension Vec2 {
     public static func fromAngle(_ angle: Float) -> Vec2 {
         Vec2(cos(angle), sin(angle))
     }
+
+    public var length: Float {
+        sqrt(x * x + y * y)
+    }
+}
+
+extension Vec3 {
+    public var xy: Vec2 {
+        Vec2(x, y)
+    }
 }
 
 public struct Mat4 {
