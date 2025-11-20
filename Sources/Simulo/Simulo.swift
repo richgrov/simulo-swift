@@ -10,6 +10,10 @@ func simulo_create_rendered_object2(material: UInt32, renderOrder: UInt32) -> UI
 @_extern(wasm, module: "env", name: "simulo_set_rendered_object_material")
 @_extern(c)
 func simulo_set_rendered_object_material(id: UInt32, material: UInt32)
+@_extern(wasm, module: "env", name: "simulo_set_rendered_object_colors")
+@_extern(c)
+func simulo_set_rendered_object_colors(
+    count: UInt32, ids: UnsafePointer<UInt32>, colors: UnsafePointer<Float>)
 @_extern(wasm, module: "env", name: "simulo_set_rendered_object_transforms")
 @_extern(c)
 func simulo_set_rendered_object_transforms(
@@ -299,6 +303,15 @@ open class RenderedObject: Object {
         simulo_drop_rendered_object(id: id)
     }
 
+    public func setMaterial(_ material: Material) {
+        simulo_set_rendered_object_material(id: self.id, material: material.id)
+    }
+
+    public func setColor(_ r: Float, _ g: Float, _ b: Float, _ a: Float = 1.0) {
+        let id = [self.id]
+        let colors = [r, g, b, a]
+        simulo_set_rendered_object_colors(count: 1, ids: id, colors: colors)
+    }
 }
 
 public class Material {
