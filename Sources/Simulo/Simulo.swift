@@ -219,7 +219,7 @@ open class Object {
     public var scale = Vec3(1, 1, 1) {
         didSet { moved() }
     }
-    public internal(set) unowned var parent: Object? = nil
+    public internal(set) weak var parent: Object? = nil
     public var transform: Mat4 {
         Mat4.translate(pos) * Mat4.rotate(rotation) * Mat4.scale(scale)
     }
@@ -267,11 +267,17 @@ open class Object {
         child.index = children.count - 1
     }
 
-    public func deleteChild(_ child: Object) {
-        children.swapAt(child.index, children.count - 1)
+    public func deleteChild(_ toDelete: Object) {
+        assert(toDelete.index != -1, "tried to delete an object that isn't a child of an object")
+
+        let isLast = toDelete.index == children.count - 1
+        children.swapAt(toDelete.index, children.count - 1)
         children.removeLast()
-        children[child.index].index = child.index
-        child.index = -1
+        if !isLast {
+            children[toDelete.index].index = toDelete.index
+        }
+        toDelete.index = -1
+        toDelete.parent = nil
     }
 
     public func deleteFromParent() {
