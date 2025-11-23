@@ -87,7 +87,9 @@ open class Game {
                 case 1:  // delete by id
                     guard offset + 4 <= limit else { return false }
                     let id = readUInt32BE(from: &eventBuf, offset: &offset, limit: limit)
-                    poses.removeValue(forKey: id)
+                    if let deleted = poses.removeValue(forKey: id) {
+                        deleted.deleteFromParent()
+                    }
 
                 case 2:  // window resize
                     guard offset + 4 <= limit else { return false }
