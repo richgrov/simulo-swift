@@ -35,6 +35,23 @@ func simulo_update_material(
 @_extern(c)
 func simulo_drop_material(id: UInt32)
 
+@_extern(wasm, module: "env", name: "simulo_set_camera_2d")
+@_extern(c)
+func simulo_set_camera_2d(near: Float, far: Float)
+
+@_extern(wasm, module: "env", name: "simulo_set_camera_3d")
+@_extern(c)
+func simulo_set_camera_3d(fov: Float, near: Float, far: Float)
+
+@_extern(wasm, module: "env", name: "simulo_set_camera_off_axis")
+@_extern(c)
+func simulo_set_camera_off_axis(
+    top: Float, bottom: Float, left: Float, right: Float, near: Float, far: Float)
+
+@_extern(wasm, module: "env", name: "simulo_set_view_matrix")
+@_extern(c)
+func simulo_set_view_matrix(matrix: UnsafePointer<Float>)
+
 @MainActor
 var transformedObjects = [ObjectIdentifier: Object]()
 
@@ -414,6 +431,89 @@ public class Material {
     deinit {
         simulo_drop_material(id: id)
     }
+}
+
+public struct Camera {
+    public var position: Vec3
+    public var rotation: Vec3
+
+    public init(position: Vec3 = Vec3(0, 0, 0), rotation: Vec3 = Vec3(0, 0, 0)) {
+        self.position = position
+        self.rotation = rotation
+    }
+}
+
+public func updateCamera(_ camera: Camera) {
+    let rotation = Mat4.rotate(camera.rotation)
+    let view = Mat4.translate(-camera.position) * rotation
+    let matrix = [
+        view.m.0.x, view.m.0.y, view.m.0.z, view.m.0.w,
+        view.m.1.x, view.m.1.y, view.m.1.z, view.m.1.w,
+        view.m.2.x, view.m.2.y, view.m.2.z, view.m.2.w,
+        view.m.3.x, view.m.3.y, view.m.3.z, view.m.3.w,
+    ]
+    simulo_set_view_matrix(matrix: matrix)
+}
+
+public protocol Projection {
+    func apply()
+}
+
+public struct Projection2d: Projection {
+    public var near: Float
+    public var far: Float
+
+    public init(near: Float, far: Float) {
+        self.near = near
+        self.far = far
+    }
+
+    public func apply() {
+        simulo_set_camera_2d(near: near, far: far)
+    }
+}
+
+public struct Projection3d: Projection {
+    public var fov: Float
+    public var near: Float
+    public var far: Float
+
+    public init(fov: Float, near: Float, far: Float) {
+        self.fov = fov
+        self.near = near
+        self.far = far
+    }
+
+    public func apply() {
+        simulo_set_camera_3d(fov: fov, near: near, far: far)
+    }
+}
+
+public struct ProjectionOffAxis: Projection {
+    public var top: Float
+    public var bottom: Float
+    public var left: Float
+    public var right: Float
+    public var near: Float
+    public var far: Float
+
+    public init(top: Float, bottom: Float, left: Float, right: Float, near: Float, far: Float) {
+        self.top = top
+        self.bottom = bottom
+        self.left = left
+        self.right = right
+        self.near = near
+        self.far = far
+    }
+
+    public func apply() {
+        simulo_set_camera_off_axis(
+            top: top, bottom: bottom, left: left, right: right, near: near, far: far)
+    }
+}
+
+public func setProjection(_ projection: Projection) {
+    projection.apply()
 }
 
 class Particle: RenderedObject {
