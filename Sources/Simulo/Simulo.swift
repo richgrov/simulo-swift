@@ -359,7 +359,7 @@ open class Object {
     }
 
     public func deleteFromParent() {
-        parent!.deleteChild(self)
+        parent?.deleteChild(self)
     }
 }
 
