@@ -339,14 +339,20 @@ open class Object {
         transformedObjects[ObjectIdentifier(self)] = self
     }
 
-    public func addChild(_ child: Object) {
-        if child.index != -1 {
-            fatalError("tried to add child that was already added")
-        }
+    public func child(_ index: Int) -> Object {
+        children[index]
+    }
 
-        children.append(child)
-        child.parent = self
-        child.index = children.count - 1
+    public func addChild(_ newChildren: Object...) {
+        for child in newChildren {
+            if child.index != -1 {
+                fatalError("tried to add child that was already added")
+            }
+
+            children.append(child)
+            child.parent = self
+            child.index = children.count - 1
+        }
     }
 
     public func deleteChild(_ toDelete: Object) {
@@ -419,23 +425,23 @@ public class Material {
     }
 
     public init(
-        _ name: String?, _ tintR: Float32, _ tintG: Float32, _ tintB: Float32, _ tintA: Float32
+        _ name: String?, tint: Vec4 = Vec4(1, 1, 1, 1)
     ) {
-        self.color = Vec4(tintR, tintG, tintB, tintA)
+        self.color = tint
 
         if let name = name {
             name.withCString { namePtr in
                 self.id = simulo_create_material(
                     namePtr: UInt32(Int(bitPattern: namePtr)), nameLen: UInt32(name.count),
-                    tintR: tintR,
-                    tintG: tintG,
-                    tintB: tintB,
-                    tintA: tintA)
+                    tintR: tint.x,
+                    tintG: tint.y,
+                    tintB: tint.z,
+                    tintA: tint.w)
             }
         } else {
             self.id = simulo_create_material(
-                namePtr: 0, nameLen: 0, tintR: tintR, tintG: tintG,
-                tintB: tintB, tintA: tintA)
+                namePtr: 0, nameLen: 0, tintR: tint.x, tintG: tint.y,
+                tintB: tint.z, tintA: tint.w)
         }
     }
 
