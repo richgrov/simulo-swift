@@ -12,6 +12,7 @@ extension Vec2i {
 }
 
 extension Vec2 {
+    @available(*, deprecated, message: "Use Vec3(Vec2, float)")
     public func extend(_ z: Float) -> Vec3 {
         Vec3(x, y, z)
     }
@@ -20,12 +21,23 @@ extension Vec2 {
         Vec2(cos(angle), sin(angle))
     }
 
+    public static func random(in rect: Rect) -> Vec2 {
+        Vec2(
+            Float.random(in: rect.pos.x..<rect.pos.x + rect.scale.x),
+            Float.random(in: rect.pos.y..<rect.pos.y + rect.scale.y),
+        )
+    }
+
     public var length: Float {
         sqrt(x * x + y * y)
     }
 }
 
 extension Vec3 {
+    init(_ v: Vec2, _ z: Float) {
+        self.init(v.x, v.y, z)
+    }
+
     public var xy: Vec2 {
         Vec2(x, y)
     }
