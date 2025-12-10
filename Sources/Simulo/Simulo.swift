@@ -308,18 +308,22 @@ open class Object {
 
     var children: [Object]
 
-    public init(pos: Vec3 = Vec3(0, 0, 0), scale: Vec3 = Vec3(1, 1, 1)) {
+    public init(
+        pos: Vec3 = Vec3(0, 0, 0), rotation: Vec3 = Vec3(0, 0, 0), scale: Vec3 = Vec3(1, 1, 1)
+    ) {
         self.pos = pos
+        self.rotation = rotation
         self.scale = scale
         self.children = []
         moved()
     }
 
     public init(
-        pos: Vec3 = Vec3(0, 0, 0), scale: Vec3 = Vec3(1, 1, 1),
+        pos: Vec3 = Vec3(0, 0, 0), rotation: Vec3 = Vec3(0, 0, 0), scale: Vec3 = Vec3(1, 1, 1),
         @ObjectChildrenBuilder children: Children
     ) {
         self.pos = pos
+        self.rotation = rotation
         self.scale = scale
         self.children = children()
         for (i, child) in self.children.enumerated() {
@@ -368,19 +372,26 @@ open class RenderedObject: Object {
     let id: UInt32
 
     public init(
-        material: Material, renderOrder: UInt32 = 0, pos: Vec3 = Vec3(0, 0, 0),
+        material: Material,
+        renderOrder: UInt32 = 0,
+        pos: Vec3 = Vec3(0, 0, 0),
+        rotation: Vec3 = Vec3(0, 0, 0),
         scale: Vec3 = Vec3(1, 1, 1)
     ) {
         id = simulo_create_rendered_object2(material: material.id, renderOrder: renderOrder)
-        super.init(pos: pos, scale: scale)
+        super.init(pos: pos, rotation: rotation, scale: scale)
     }
 
     public init(
-        material: Material, renderOrder: UInt32 = 0, pos: Vec3 = Vec3(0, 0, 0),
-        scale: Vec3 = Vec3(1, 1, 1), @ObjectChildrenBuilder children: Children
+        material: Material,
+        renderOrder: UInt32 = 0,
+        pos: Vec3 = Vec3(0, 0, 0),
+        rotation: Vec3 = Vec3(0, 0, 0),
+        scale: Vec3 = Vec3(1, 1, 1),
+        @ObjectChildrenBuilder children: Children
     ) {
         id = simulo_create_rendered_object2(material: material.id, renderOrder: renderOrder)
-        super.init(pos: pos, scale: scale, children: children)
+        super.init(pos: pos, rotation: rotation, scale: scale, children: children)
     }
 
     deinit {
